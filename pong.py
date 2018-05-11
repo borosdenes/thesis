@@ -109,8 +109,10 @@ ENVIRONMENT = 'Pong-v0'
 # -----------------------------------------------------------
 
 log_formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
-log_path = '/home/deeplearning/borosdenes/thesis/logs/{env}/{id}.log'.format(env=ENVIRONMENT,
-                                                                             id=generated_identifier)
+log_path = './logs/{env}/{id}.log'.format(env=ENVIRONMENT,
+                                          id=generated_identifier)
+if not os.path.exists(os.path.dirname(log_path)):
+    os.makedirs(os.path.dirname(log_path))
 
 logger = logging.getLogger()
 
@@ -180,22 +182,27 @@ with tf.name_scope('training'):
 # -----------------------------------------------------------
 env = gym.make(ENVIRONMENT)
 sess.run(tf.global_variables_initializer())
-writer = tf.summary.FileWriter('/home/deeplearning/borosdenes/thesis/summaries/{env}/{id}/'
+writer = tf.summary.FileWriter('./summaries/{env}/{id}/'
                                .format(env=ENVIRONMENT, id=generated_identifier))
 writer.add_graph(sess.graph)
 summ = tf.summary.merge_all()
 saver = tf.train.Saver()
+
+model_folder = './checkpoints/{env}/{id}'\
+                 .format(env=ENVIRONMENT, id=generated_identifier)
 
 
 logger.info('Everything is initialized. Starting training ...')
 
 with sess:
 
-    model_folder = '/home/deeplearning/borosdenes/thesis/checkpoints/{env}/{id}'\
+    model_folder = './checkpoints/{env}/{id}'\
                  .format(env=ENVIRONMENT, id=generated_identifier)
     if os.path.exists(model_folder):
         logger.info('Restoring model from {} ...'.format(model_folder))
         saver.restore(sess, tf.train.latest_checkpoint(model_folder))
+    else:
+        os.makedirs(model_folder)
 
     echo_no = 0
     while True:
