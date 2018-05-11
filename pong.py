@@ -167,15 +167,8 @@ with tf.name_scope('cross_entropy'):
                                                     weights=rewards)
     tf.summary.scalar('cross_entropy', cross_entropy)
 
-# with tf.name_scope('log_loss'):
-#     loss = tf.losses.log_loss(
-#         labels=actions,
-#         predictions=Ylogits,
-#         weights=rewards)
-#     tf.summary.scalar('log_loss', loss)
 
 with tf.name_scope('training'):
-    # optimizer = tf.train.RMSPropOptimizer(learning_rate=0.005, decay=0.99)
     optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
     train_op = optimizer.minimize(cross_entropy)
 
@@ -255,13 +248,11 @@ with sess:
                      mean_rewards: avg_rewards,
                      mean_game_length: float(len(_actions))/game_counter}
 
-        # [train_accuracy, s] = sess.run([accuracy, summ], feed_dict=feed_dict)
         _, s = sess.run([train_op, summ], feed_dict=feed_dict)
 
         if echo_no % args.summarize_every_n_episodes == 0:
             writer.add_summary(s, echo_no)
 
         if echo_no % args.checkpoint_every_n_episodes == 0:
-            saver.save(sess, model_folder+'/')
-
+            saver.save(sess, os.path.join(model_folder, 'model.ckpt'))
         echo_no += 1
