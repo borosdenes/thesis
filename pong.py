@@ -20,19 +20,21 @@ parser.add_argument('--learning_rate', type=float, default=0.001)
 parser.add_argument('--batch_size', type=int, default=6400)
 parser.add_argument('--checkpoint_every_n_episodes', type=int, default=10)
 parser.add_argument('--discount_factor', type=int, default=0.99)
-parser.add_argument('--render', action='store_true')
+parser.add_argument('--render', type=int)
 parser.add_argument('--summarize_every_n_episodes', type=int, default=5)
 parser.add_argument('-id', '--identifier', type=str, required=True,
                     help='You can define loss type, optimizer and etc here. (e.g. xent_adam_l001_d99')
+parser.add_argument('--clean', action='store_true')
 args = parser.parse_args()
 
 generated_identifier = \
     '_'.join([str(args.hidden_layer_size), str(args.batch_size), args.identifier])
+
 # -----------------------------------------------------------
 
 # -- CONSTANTS ----------------------------------------------
 # -----------------------------------------------------------
-OBSERVATION_SIZE = 6400
+# OBSERVATION_SIZE = 6400
 BATCH_SIZE = args.batch_size
 ENVIRONMENT = 'Pong-v0'
 
@@ -41,6 +43,19 @@ action_dictionary = {
     1:2,
     2:3
 }
+
+if args.clean:
+    try:
+        os.remove('./logs/{env}/{id}.log'.format(env=ENVIRONMENT,
+                                                 id=generated_identifier))
+    except OSError:
+        pass
+    shutil.rmtree('./checkpoints/{env}/{id}'.format(env=ENVIRONMENT,
+                                                    id=generated_identifier),
+                  ignore_errors=True)
+    shutil.rmtree('./summaries/{env}/{id}'.format(env=ENVIRONMENT,
+                                                  id=generated_identifier),
+                  ignore_errors=True)
 
 # -- LOGGING INITIALIZER ------------------------------------
 # -----------------------------------------------------------
@@ -60,22 +75,24 @@ logger.addHandler(file_handler)
 
 logger.setLevel(logging.DEBUG)
 logger.debug('''Setting constants ...'
-                OBSERVATION_SIZE = {}
                 BATCH_SIZE = {}
                 ENVIRONMENT = {})'''
-             .format(OBSERVATION_SIZE, BATCH_SIZE, ENVIRONMENT))
+             .format(BATCH_SIZE, ENVIRONMENT))
 # -----------------------------------------------------------
 
 # -- INITIALIZING STEPS -------------------------------------
 # -----------------------------------------------------------
 sess = tf.Session()
-
 logger.debug('Setting up training placeholders, variables and graph ...')
+
 observations = tf.placeholder(tf.float32,
-                              [None, OBSERVATION_SIZE],
+                              [None, 80, 80],
                               name='observations')
+observation_images = tf.reshape(observations, [-1, 80, 80, 1])
+
 actions = tf.placeholder(dtype=tf.int32, shape=[None], name='actions')
 tf.summary.histogram('actions', actions)
+
 rewards = tf.placeholder(dtype=tf.float32, shape=[None], name='rewards')
 mean_rewards = tf.placeholder(dtype=tf.float32, name='mean_rewards')
 mean_game_length = tf.placeholder(dtype=tf.float32, name='mean_game_length')
@@ -84,13 +101,15 @@ tf.summary.scalar('mean_rewards', mean_rewards)
 
 # -- TRAINING SETUP -----------------------------------------
 # -----------------------------------------------------------
-Y = fc_layer(input=observations,
-             size_in=OBSERVATION_SIZE,
-             size_out=args.hidden_layer_size,
-             name='hidden_layer')
-Y_out = tf.nn.relu(Y)
-Ylogits = fc_layer(input=Y_out,
-                   size_in=args.hidden_layer_size,
+
+Y = conv_layer(input=observation_images,
+               in_channels=1,
+               out_channels=2)
+
+flattened = tf.reshape(Y, [-1, 40*40*2])
+
+Ylogits = fc_layer(input=flattened,
+                   size_in=40*40*2,
                    size_out=3,
                    name='ylogits')
 
@@ -129,13 +148,17 @@ with sess:
     model_folder = './checkpoints/{env}/{id}'\
                  .format(env=ENVIRONMENT, id=generated_identifier)
     if os.path.exists(model_folder):
-        logger.info('Restoring model from {} ...'.format(model_folder))
-        saver.restore(sess, tf.train.latest_checkpoint(model_folder))
+        try:
+            logger.info('Restoring model from {} ...'.format(model_folder))
+            saver.restore(sess, tf.train.latest_checkpoint(model_folder))
+        except ValueError:
+            pass
     else:
         os.makedirs(model_folder)
 
     echo_no = 0
     while True:
+        logger.info('Starting echo #{} ...'.format(echo_no))
         game_counter = 0
         _observations = []
         _actions = []
@@ -146,17 +169,18 @@ with sess:
             logger.debug('Collected {} of {} observations ({:.1f} %).'.format(before_counter,
                                                                               BATCH_SIZE,
                                                                               float(before_counter)/BATCH_SIZE*100))
-            previous_pix = prepro(env.reset())
+            previous_pix = prepro(env.reset(), flatten=False)
             game_state, _, done, _ = env.step(env.action_space.sample())
             game_counter += 1
 
             while not done:
-                current_pix = prepro(game_state)
+                current_pix = prepro(game_state, flatten=False)
                 observation = current_pix - previous_pix
                 previous_pix = current_pix
 
                 if args.render:
-                    env.render()
+                    if (echo_no != 0) & (echo_no % args.render == 0) & (game_counter == 1):
+                        env.render()
                 action = sess.run(sample_op, feed_dict={observations: [observation]})
                 game_state, reward, done, info = env.step(action_dictionary[int(action)])
 
@@ -179,7 +203,7 @@ with sess:
         _rewards /= np.std(_rewards)
 
         logger.debug('Training on current batch ...')
-        feed_dict = {observations: np.squeeze(np.vstack(_observations)),
+        feed_dict = {observations: _observations,
                      actions: np.squeeze(np.hstack(_actions)),
                      rewards: np.squeeze(np.hstack(processed_rewards)),
                      mean_rewards: avg_rewards,

@@ -1,10 +1,22 @@
 import tensorflow as tf
 
 
-def conv_layer(input, size_in, size_out, name="conv"):
+def conv_layer(input, in_channels, out_channels, filter_size=5, name="conv"):
+    """
+
+    Args:
+        input: tensor of shape [batch, in_height, in_width, in_channels]
+        in_channels:
+        out_channels:
+        name:
+
+    Returns:
+
+    """
     with tf.name_scope(name):
-        w = tf.Variable(tf.truncated_normal([5, 5, size_in, size_out], stddev=0.1), name="W")
-        b = tf.Variable(tf.constant(0.1, shape=[size_out]), name="B")
+        w = tf.Variable(tf.truncated_normal([filter_size, filter_size, in_channels, out_channels], stddev=0.1), name="W")
+        # filter / kernel tensor of shape [filter_height, filter_width, in_channels, out_channels]
+        b = tf.Variable(tf.constant(0.1, shape=[out_channels]), name="B")
         conv = tf.nn.conv2d(input, w, strides=[1, 1, 1, 1], padding="SAME")
         act = tf.nn.relu(conv + b)
         tf.summary.histogram("weights", w)
