@@ -23,14 +23,12 @@ action_dictionary = {
 # -- ARGUMENT PARSING ---------------------------------------
 # -----------------------------------------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument('--hidden_layer_size', type=int, default=224)
 parser.add_argument('-mp', '--model_folder', type=str, required=True)
 args = parser.parse_args()
 # -----------------------------------------------------------
 
 # -- CONSTANTS ----------------------------------------------
 # -----------------------------------------------------------
-OBSERVATION_SIZE = 6400
 ENVIRONMENT = 'Pong-v0'
 
 # -- INITIALIZING STEPS -------------------------------------
@@ -38,18 +36,32 @@ ENVIRONMENT = 'Pong-v0'
 sess = tf.Session()
 
 observations = tf.placeholder(tf.float32,
-                              [None, OBSERVATION_SIZE],
+                              [None, 80, 80],
                               name='observations')
+observation_images = tf.reshape(observations, [-1, 80, 80, 1])
+
+actions = tf.placeholder(dtype=tf.int32, shape=[None], name='actions')
+
 
 # -- TRAINING SETUP -----------------------------------------
 # -----------------------------------------------------------
-Y = fc_layer(input=observations,
-             size_in=OBSERVATION_SIZE,
-             size_out=args.hidden_layer_size,
-             name='hidden_layer')
-Y_out = tf.nn.relu(Y)
-Ylogits = fc_layer(input=Y_out,
-                   size_in=args.hidden_layer_size,
+
+conv_1 = conv_layer(input=observation_images,
+                    in_channels=1,
+                    out_channels=2,
+                    filter_size=3,
+                    max_pool=False)
+
+conv_2 = conv_layer(input=conv_1,
+                    in_channels=2,
+                    out_channels=1,
+                    filter_size=3,
+                    max_pool=False)
+
+flattened = tf.reshape(conv_2, [-1, 80*80])
+
+Ylogits = fc_layer(input=flattened,
+                   size_in=80*80,
                    size_out=3,
                    name='ylogits')
 
@@ -62,11 +74,11 @@ saver = tf.train.Saver()
 with sess:
 
     saver.restore(sess, tf.train.latest_checkpoint(args.model_folder))
-    previous_pix = prepro(env.reset())
+    previous_pix = prepro(env.reset(), flatten=False, color='gray', downsample='pil')
     game_state, _, done, _ = env.step(env.action_space.sample())
 
     while not done:
-        current_pix = prepro(game_state)
+        current_pix = prepro(game_state, flatten=False, color='gray', downsample='pil')
         observation = current_pix - previous_pix
         previous_pix = current_pix
 

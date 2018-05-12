@@ -7,6 +7,7 @@ import logging
 import os
 import pandas as pd
 import math
+import PIL
 
 from environment_utils import prepro, discount_rewards
 from network_utils import fc_layer, conv_layer
@@ -17,7 +18,8 @@ from network_utils import fc_layer, conv_layer
 parser = argparse.ArgumentParser()
 parser.add_argument('--hidden_layer_size', type=int, default=224)
 parser.add_argument('--learning_rate', type=float, default=0.001)
-parser.add_argument('--batch_size', type=int, default=6400)
+parser.add_argument('--batch_size', type=int, required=True,
+                    help='6400')
 parser.add_argument('--checkpoint_every_n_episodes', type=int, default=10)
 parser.add_argument('--discount_factor', type=int, default=0.99)
 parser.add_argument('--render', type=int)
@@ -25,10 +27,8 @@ parser.add_argument('--summarize_every_n_episodes', type=int, default=5)
 parser.add_argument('-id', '--identifier', type=str, required=True,
                     help='You can define loss type, optimizer and etc here. (e.g. xent_adam_l001_d99')
 parser.add_argument('--clean', action='store_true')
+parser.add_argument('--show_observation', action='store_true')
 args = parser.parse_args()
-
-generated_identifier = \
-    '_'.join([str(args.hidden_layer_size), str(args.batch_size), args.identifier])
 
 # -----------------------------------------------------------
 
@@ -47,14 +47,14 @@ action_dictionary = {
 if args.clean:
     try:
         os.remove('./logs/{env}/{id}.log'.format(env=ENVIRONMENT,
-                                                 id=generated_identifier))
+                                                 id=args.identifier))
     except OSError:
         pass
     shutil.rmtree('./checkpoints/{env}/{id}'.format(env=ENVIRONMENT,
-                                                    id=generated_identifier),
+                                                    id=args.identifier),
                   ignore_errors=True)
     shutil.rmtree('./summaries/{env}/{id}'.format(env=ENVIRONMENT,
-                                                  id=generated_identifier),
+                                                  id=args.identifier),
                   ignore_errors=True)
 
 # -- LOGGING INITIALIZER ------------------------------------
@@ -62,7 +62,7 @@ if args.clean:
 
 log_formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 log_path = './logs/{env}/{id}.log'.format(env=ENVIRONMENT,
-                                          id=generated_identifier)
+                                          id=args.identifier)
 if not os.path.exists(os.path.dirname(log_path)):
     os.makedirs(os.path.dirname(log_path))
 
@@ -102,14 +102,22 @@ tf.summary.scalar('mean_rewards', mean_rewards)
 # -- TRAINING SETUP -----------------------------------------
 # -----------------------------------------------------------
 
-Y = conv_layer(input=observation_images,
-               in_channels=1,
-               out_channels=2)
+conv_1 = conv_layer(input=observation_images,
+                    in_channels=1,
+                    out_channels=2,
+                    filter_size=3,
+                    max_pool=False)
 
-flattened = tf.reshape(Y, [-1, 40*40*2])
+conv_2 = conv_layer(input=conv_1,
+                    in_channels=2,
+                    out_channels=1,
+                    filter_size=3,
+                    max_pool=False)
+
+flattened = tf.reshape(conv_2, [-1, 80*80])
 
 Ylogits = fc_layer(input=flattened,
-                   size_in=40*40*2,
+                   size_in=80*80,
                    size_out=3,
                    name='ylogits')
 
@@ -132,13 +140,13 @@ with tf.name_scope('training'):
 env = gym.make(ENVIRONMENT)
 sess.run(tf.global_variables_initializer())
 writer = tf.summary.FileWriter('./summaries/{env}/{id}/'
-                               .format(env=ENVIRONMENT, id=generated_identifier))
+                               .format(env=ENVIRONMENT, id=args.identifier))
 writer.add_graph(sess.graph)
 summ = tf.summary.merge_all()
 saver = tf.train.Saver()
 
 model_folder = './checkpoints/{env}/{id}'\
-                 .format(env=ENVIRONMENT, id=generated_identifier)
+                 .format(env=ENVIRONMENT, id=args.identifier)
 
 
 logger.info('Everything is initialized. Starting training ...')
@@ -146,7 +154,7 @@ logger.info('Everything is initialized. Starting training ...')
 with sess:
 
     model_folder = './checkpoints/{env}/{id}'\
-                 .format(env=ENVIRONMENT, id=generated_identifier)
+                 .format(env=ENVIRONMENT, id=args.identifier)
     if os.path.exists(model_folder):
         try:
             logger.info('Restoring model from {} ...'.format(model_folder))
@@ -169,13 +177,15 @@ with sess:
             logger.debug('Collected {} of {} observations ({:.1f} %).'.format(before_counter,
                                                                               BATCH_SIZE,
                                                                               float(before_counter)/BATCH_SIZE*100))
-            previous_pix = prepro(env.reset(), flatten=False)
+            previous_pix = prepro(env.reset(), flatten=False, color='gray', downsample='pil')
             game_state, _, done, _ = env.step(env.action_space.sample())
             game_counter += 1
 
             while not done:
-                current_pix = prepro(game_state, flatten=False)
+                current_pix = prepro(game_state, flatten=False, color='gray', downsample='pil')
                 observation = current_pix - previous_pix
+                if args.show_observation:
+                    PIL.Image.fromarray(observation).show()
                 previous_pix = current_pix
 
                 if args.render:
