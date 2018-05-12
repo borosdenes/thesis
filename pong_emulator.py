@@ -7,35 +7,10 @@ import logging
 import os
 import pandas as pd
 import math
-
+from environment_utils import prepro
+from network_utils import fc_layer, conv_layer
 
 # -----------------------------------------------------------
-
-
-def prepro(I):
-    """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
-    I = I[35:195]  # crop
-    I = I[::2, ::2, 0]  # downsample by factor of 2
-    I[I == 144] = 0  # erase background (background type 1)
-    I[I == 109] = 0  # erase background (background type 2)
-    I[I != 0] = 1  # everything else (paddles, ball) just set to 1
-    return I.astype(np.float).ravel()
-
-
-def discount_rewards(rewards, discount_factor):
-    discounted_rewards = np.zeros_like(rewards)
-    normalized_zero = rewards[0]
-    for t in range(len(rewards)):
-        discounted_reward_sum = 0
-        discount = 1
-        for k in range(t, len(rewards)):
-            discounted_reward_sum += rewards[k] * discount
-            discount *= discount_factor
-            if rewards[k] != 0:
-                # Don't count rewards from subsequent rounds
-                break
-        discounted_rewards[t] = discounted_reward_sum
-    return discounted_rewards
 
 
 action_dictionary = {
@@ -43,42 +18,6 @@ action_dictionary = {
     1:2,
     2:3
 }
-
-
-# -----------------------------------------------------------
-
-
-def conv_layer(input, size_in, size_out, name="conv"):
-    with tf.name_scope(name):
-        w = tf.Variable(tf.truncated_normal([5, 5, size_in, size_out], stddev=0.1), name="W")
-        b = tf.Variable(tf.constant(0.1, shape=[size_out]), name="B")
-        conv = tf.nn.conv2d(input, w, strides=[1, 1, 1, 1], padding="SAME")
-        act = tf.nn.relu(conv + b)
-        tf.summary.histogram("weights", w)
-        tf.summary.histogram("biases", b)
-        tf.summary.histogram("activations", act)
-        return tf.nn.max_pool(act, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-
-
-def fc_layer(input, size_in, size_out, name="fc"):
-    with tf.name_scope(name):
-        w = tf.Variable(tf.truncated_normal([size_in, size_out], stddev=0.1), name="W")
-        b = tf.Variable(tf.constant(0.1, shape=[size_out]), name="B")
-        act = tf.matmul(input, w) + b
-        tf.summary.histogram("weights", w)
-        tf.summary.histogram("biases", b)
-        tf.summary.histogram("activations", act)
-        return act
-
-
-def calculate_cross_entropy(one_hot,logit,weights=None):
-    one_hot = pd.DataFrame(one_hot).astype(bool)
-    logit = pd.DataFrame(logit)
-    if weights:
-        weights = pd.Series(weights)
-        return logit.mask(one_hot).sum(axis=1)*weights
-    else:
-        return logit.mask(one_hot).sum(axis=1)
 
 
 # -- ARGUMENT PARSING ---------------------------------------
