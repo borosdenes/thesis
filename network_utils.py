@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def conv_layer(input, in_channels, out_channels, filter_size=5, name="conv"):
+def conv_layer(input, in_channels, out_channels, filter_size=5, max_pool=True, name="conv"):
     """
 
     Args:
@@ -22,7 +22,10 @@ def conv_layer(input, in_channels, out_channels, filter_size=5, name="conv"):
         tf.summary.histogram("weights", w)
         tf.summary.histogram("biases", b)
         tf.summary.histogram("activations", act)
-        return tf.nn.max_pool(act, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+        if max_pool:
+            return tf.nn.max_pool(act, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+        else:
+            return act
 
 
 def fc_layer(input, size_in, size_out, name="fc"):
