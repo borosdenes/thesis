@@ -95,10 +95,12 @@ tf.summary.histogram('actions', actions)
 
 rewards = tf.placeholder(dtype=tf.float32, shape=[None], name='rewards')
 mean_rewards = tf.placeholder(dtype=tf.float32, name='mean_rewards')
-mean_game_length = tf.placeholder(dtype=tf.float32, name='mean_game_length')
 tf.summary.scalar('mean_rewards', mean_rewards)
-
-
+mean_game_length = tf.placeholder(dtype=tf.float32, name='mean_game_length')
+tf.summary.scalar('mean_game_length', mean_game_length)
+global_step = tf.Variable(0, name='global_step', trainable=False)
+increment_global_step = tf.assign_add(global_step, 1,
+                                      name='increment_global_step')
 # -- TRAINING SETUP -----------------------------------------
 # -----------------------------------------------------------
 
@@ -134,11 +136,10 @@ with tf.name_scope('cross_entropy'):
 
 with tf.name_scope('training'):
     optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
-    train_op = optimizer.minimize(cross_entropy)
+    train_op = optimizer.minimize(cross_entropy, global_step=global_step)
 
 # -----------------------------------------------------------
 env = gym.make(ENVIRONMENT)
-sess.run(tf.global_variables_initializer())
 writer = tf.summary.FileWriter('./summaries/{env}/{id}/'
                                .format(env=ENVIRONMENT, id=args.identifier))
 writer.add_graph(sess.graph)
@@ -160,13 +161,13 @@ with sess:
             logger.info('Restoring model from {} ...'.format(model_folder))
             saver.restore(sess, tf.train.latest_checkpoint(model_folder))
         except ValueError:
-            pass
+            raise
     else:
+        sess.run(tf.global_variables_initializer())
         os.makedirs(model_folder)
 
-    echo_no = 0
     while True:
-        logger.info('Starting echo #{} ...'.format(echo_no))
+        logger.info('Starting echo #{} ...'.format(global_step.eval()))
         game_counter = 0
         _observations = []
         _actions = []
@@ -189,7 +190,7 @@ with sess:
                 previous_pix = current_pix
 
                 if args.render:
-                    if (echo_no != 0) & (echo_no % args.render == 0) & (game_counter == 1):
+                    if (global_step.eval() != 0) & (global_step.eval() % args.render == 0) & (game_counter == 1):
                         env.render()
                 action = sess.run(sample_op, feed_dict={observations: [observation]})
                 game_state, reward, done, info = env.step(action_dictionary[int(action)])
@@ -221,9 +222,11 @@ with sess:
 
         _, s = sess.run([train_op, summ], feed_dict=feed_dict)
 
-        if echo_no % args.summarize_every_n_episodes == 0:
-            writer.add_summary(s, echo_no)
+        if global_step.eval() % args.summarize_every_n_episodes == 0:
+            logger.debug('Summarizing (every {} epoch) ...'.format(args.summarize_every_n_episodes))
+            writer.add_summary(s, global_step.eval())
 
-        if echo_no % args.checkpoint_every_n_episodes == 0:
-            saver.save(sess, os.path.join(model_folder, 'model.ckpt'))
-        echo_no += 1
+        if global_step.eval() % args.checkpoint_every_n_episodes == 0:
+            logger.debug('Saving checkpoint (every {} epoch) ...'.format(args.checkpoint_every_n_episodes))
+            saver.save(sess,
+                       os.path.join(model_folder, 'model.ckpt'))
