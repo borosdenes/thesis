@@ -1,12 +1,10 @@
-import numpy as np
+"""
+Emulator to visualize trained agent behaviour.
+"""
+
 import tensorflow as tf
 import argparse
-import shutil
 import gym
-import logging
-import os
-import pandas as pd
-import math
 from environment_utils import prepro
 from network_utils import fc_layer, conv_layer
 

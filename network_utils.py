@@ -1,3 +1,8 @@
+"""
+Utilities to create different type of network elements.
+Low-level tensorflow is being used for the sake of modifiability and transparancy.
+"""
+
 import tensorflow as tf
 
 

@@ -1,3 +1,12 @@
+"""
+Main trianing script for pong.
+
+Corresponding releases:
+    1.0 as mlp_224_bin_b6400
+    1.1 as mlp_32_bin_b6400
+    2.0 as conv_132_231_gray_b6400
+"""
+
 import numpy as np
 import tensorflow as tf
 import argparse

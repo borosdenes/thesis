@@ -1,11 +1,14 @@
+"""
+Environment utility functions.
+OpenCV is avoided due to bad installation.
+"""
+
 import numpy as np
 from PIL import Image
 
 
-
 def rgb2gray(rgb):
     return np.dot(rgb[...,:3], [0.299, 0.587, 0.114])
-
 
 
 def prepro(I, flatten=True, color='bin', downsample='simple'):
