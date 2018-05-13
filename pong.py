@@ -5,8 +5,6 @@ import shutil
 import gym
 import logging
 import os
-import pandas as pd
-import math
 import PIL
 
 from environment_utils import prepro, discount_rewards
@@ -89,6 +87,9 @@ observations = tf.placeholder(tf.float32,
                               [None, 80, 80],
                               name='observations')
 observation_images = tf.reshape(observations, [-1, 80, 80, 1])
+# observations = tf.placeholder(tf.float32,
+#                               [None, 6400],
+#                               name='observations')
 
 actions = tf.placeholder(dtype=tf.int32, shape=[None], name='actions')
 tf.summary.histogram('actions', actions)
@@ -122,6 +123,16 @@ Ylogits = fc_layer(input=flattened,
                    size_in=80*80,
                    size_out=3,
                    name='ylogits')
+
+# Y = fc_layer(input=observations,
+#              size_in=6400,
+#              size_out=32,
+#              name='hidden_layer')
+# Y_out = tf.nn.relu(Y)
+# Ylogits = fc_layer(input=Y_out,
+#                    size_in=32,
+#                    size_out=3,
+#                    name='ylogits')
 
 sample_op = tf.multinomial(logits=tf.reshape(Ylogits, shape=(1, 3)), num_samples=1)
 
@@ -179,11 +190,13 @@ with sess:
                                                                               BATCH_SIZE,
                                                                               float(before_counter)/BATCH_SIZE*100))
             previous_pix = prepro(env.reset(), flatten=False, color='gray', downsample='pil')
+            # previous_pix = prepro(env.reset())
             game_state, _, done, _ = env.step(env.action_space.sample())
             game_counter += 1
 
             while not done:
                 current_pix = prepro(game_state, flatten=False, color='gray', downsample='pil')
+                # current_pix = prepro(game_state)
                 observation = current_pix - previous_pix
                 if args.show_observation:
                     PIL.Image.fromarray(observation).show()
