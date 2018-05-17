@@ -3,7 +3,6 @@ Main trianing script for pong.
 
 Corresponding releases:
     1.0 as mlp_224_bin_b6400
-    1.1 as mlp_32_bin_b6400
     2.0 as conv_132_231_gray_b6400
 """
 
@@ -14,9 +13,8 @@ import shutil
 import gym
 import logging
 import os
-import PIL
 
-from environment_utils import prepro, discount_rewards
+from environment_utils import prepro, discount_rewards, bin_prepro
 
 # -- ARGUMENT PARSING ---------------------------------------
 # -----------------------------------------------------------
@@ -26,9 +24,10 @@ parser.add_argument('-id', '--identifier', type=str, required=True,
                     You can define loss type, optimizer and etc here.
                     Format: networktype__network_details__preprotype__hyperparams
                     
-                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)__prepro(gray)__b(6400)_l(0.001)_d(0.99)
-                    cnn__c(3.3.10)_c(10.3.1)_f(6400.3)__prepro(None)__b(6400)_l(0.001)_d(0.99)
-                    mlp__f(6400.256)_f(256.3)__prepro(bin)__b(6400)_l(0.001)_d(0.99)''')
+                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)__prepro(crop_gray_diff)__b(6400)_l(0.001)_d(0.99)
+                    cnn__c(3.3.10)_c(10.3.1)_f(6400.3)__prepro(crop)__b(6400)_l(0.001)_d(0.99)
+                    mlp__f(6400.256)_f(256.3)__prepro(crop_bin_diff)__b(6400)_l(0.001)_d(0.99)
+                    cnn_lstm__c(1.3.2)_c(2.3.1)_f(6400.256)_l(?)__prepro(crop)__b(?)_l(?)_d(0.99)''')
 
 parser.add_argument('--environment', type=str, required=True,
                     help='Pong-v0')
@@ -61,9 +60,12 @@ def unwrap(string_with_parathesis):
     return string_with_parathesis[string_with_parathesis.find('(')+1:string_with_parathesis.find(')')]
 
 
-preprocess_type = unwrap(preprocess_type)
-if preprocess_type == 'None':
-    preprocess_type = None
+preprocessors = unwrap(preprocess_type).split('_')
+if 'crop' in preprocessors:
+    do_crop = args.environment
+else:
+    do_crop = False
+do_grayscale = 'gray' in preprocessors
 
 batch_size, learning_rate, discount_rate = map(unwrap, hyperparameters.split('_'))
 batch_size = int(batch_size)
@@ -121,7 +123,7 @@ logger.debug('''Setting up training ...'
 # -- INITIALIZING STEPS -------------------------------------
 # -----------------------------------------------------------
 config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
+# config.gpu_options.allow_growth = True
 sess = tf.Session(config=config)
 logger.debug('Setting up training placeholders, variables and graph ...')
 
@@ -130,16 +132,33 @@ if network_type == 'mlp':
                                   [None, 80*80],
                                   name='observations')
 elif network_type == 'cnn':
-    if preprocess_type == 'gray':
+    if ('gray' in preprocessors) or ('bin' in preprocessors):
         observations = tf.placeholder(tf.float32,
                                       [None, None, None, 1],
                                       name='observations')
-    elif preprocess_type == None:
+    else:
         observations = tf.placeholder(tf.float32,
                                       [None, None, None, 3],
                                       name='observations')
+
+elif network_type == 'cnn_lstm':
+    if ('gray' in preprocessors) or ('bin' in preprocessors):
+        single_observation = tf.placeholder(tf.float32,
+                                            [None, None, 1],
+                                            name='single_observation')
+        observations = tf.placeholder(tf.float32,
+                                      [None, None, None, 1],
+                                      name='observations')
     else:
-        raise NotImplementedError
+        single_observation = tf.placeholder(tf.float32,
+                                            [None, None, 3],
+                                            name='single_observation')
+        observations = tf.placeholder(tf.float32,
+                                      [None, None, None, 3],
+                                      name='observations')
+
+elif network_type == 'cnn_lstm':
+    raise NotImplementedError
 
     # observation_images = tf.reshape(observations, [-1, 80, 80, 1])
 
@@ -174,6 +193,7 @@ if network_type == 'mlp':
             )
 
 elif network_type == 'cnn':
+    # observations = tf.map_fn(tf.image.per_image_standardization, observations)
     for idx, layer in enumerate(cnn_layers):
         input_channels, kernel_size, output_channels = map(int, unwrap(layer).split('.'))
         if idx == 0:
@@ -193,14 +213,16 @@ elif network_type == 'cnn':
                                  activation=tf.nn.relu)
             )
 
-    if preprocess_type == 'gray':
+    if ('crop' in preprocessors) & (args.environment == 'Pong-v0'):
         layers.append(
-            layers.reshape(layers[-1], [-1, 80*80])
+            tf.reshape(layers[-1], [-1, 80*80])
         )
-    elif preprocess_type == None:
+    elif args.environment == 'Pong-v0':
         layers.append(
             tf.reshape(layers[-1], [-1, 210*160])
         )
+    else:
+        raise NotImplementedError
 
     for layer in dense_layers:
         input_len, output_len = map(int, unwrap(layer).split('.'))
@@ -209,6 +231,8 @@ elif network_type == 'cnn':
                             units=output_len,
                             activation=tf.nn.relu)
         )
+# elif network_type == 'cnn_lstm':
+
 
 # TODO: LSTM with logit output of size 3
 
@@ -245,7 +269,6 @@ with sess:
                     '{}'.format(args.load))
         saver.restore(sess, tf.train.latest_checkpoint('./checkpoints/{}/{}'.format(args.environment, args.load)))
 
-
     model_folder = './checkpoints/{env}/{id}'\
                  .format(env=args.environment, id=args.identifier)
     if os.path.exists(model_folder):
@@ -268,29 +291,29 @@ with sess:
             logger.debug('Collected {} of {} observations ({:.1f} %).'.format(before_counter,
                                                                               batch_size,
                                                                               float(before_counter) / batch_size * 100))
-            if preprocess_type == 'gray':
-                previous_pix = prepro(env.reset(), flatten=False, color='gray', downsample='pil')
-            elif preprocess_type == 'bin':
-                previous_pix = prepro(env.reset())
-            elif preprocess_type != None:
-                raise NotImplementedError
+
+            if 'bin' in preprocessors:
+                previous_pix = bin_prepro(env.reset())
             else:
-                previous_pix = env.reset()
+                previous_pix = prepro(env.reset(), crop=do_crop, grayscale=do_grayscale, resize_to=80)
 
             game_state, _, done, _ = env.step(env.action_space.sample())
             game_counter += 1
 
             while not done:
-                if preprocess_type == 'gray':
-                    current_pix = prepro(game_state, flatten=False, color='gray', downsample='pil')
-                elif preprocess_type == 'bin':
-                    current_pix = prepro(game_state)
-                elif preprocess_type != None:
-                    raise NotImplementedError
+                if 'bin' in preprocessors:
+                    current_pix = bin_prepro(game_state)
                 else:
-                    current_pix = game_state
+                    current_pix = prepro(game_state, crop=do_crop, grayscale=do_grayscale, resize_to=80)
 
-                observation = current_pix
+                if 'diff' in preprocessors:
+                    observation = current_pix - previous_pix
+
+                # Rescale input feature to [-1, 1]
+                observation = \
+                    (current_pix - np.min(current_pix, axis=(0, 1), keepdims=True))/(
+                            np.max(current_pix, axis=(0, 1), keepdims=True) - np.min(current_pix, axis=(0, 1), keepdims=True))
+
                 previous_pix = current_pix
 
                 if args.render:

@@ -5,33 +5,47 @@ OpenCV is avoided due to bad installation.
 
 import numpy as np
 from PIL import Image
+import cv2
 
 
 def rgb2gray(rgb):
     return np.dot(rgb[...,:3], [0.299, 0.587, 0.114])
 
 
-def prepro(I, flatten=True, color='bin', downsample='simple'):
+def bin_prepro(I):
     """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
     I = I[35:195]  # crop
+    I = I[::2, ::2, 0]  # downsample by factor of 2
+    I[I == 144] = 0  # erase background (background type 1)
+    I[I == 109] = 0  # erase background (background type 2)
+    I[I != 0] = 1  # everything else (paddles, ball) just set to 1
+    return I.astype(np.float).ravel()
 
-    if downsample == 'simple':
-        I = I[::2, ::2, 0]  # downsample by factor of 2
 
-    if (downsample == 'pil') & (color == 'gray'):
-        I = np.array(Image.fromarray(I).convert(mode='L').resize((80, 80)))
+def prepro(image, crop='Pong-v0', grayscale=True, resize_to=80):
+    """
+    Args:
+        image: input image with shape (W,H,Ch)
+        crop: [environment..., None]
+        color: ['bin', 'gray', None]
+        resize_to: int
 
-    elif downsample == 'cv2':
+    Returns:
+        preprocessed image
+    """
+
+    if crop == 'Pong-v0':
+        image = image[35:195]  # crop
+    elif crop is not None:
         raise NotImplementedError
 
-    if color == 'bin':
-        I[I == 144] = 0  # erase background (background type 1)
-        I[I == 109] = 0  # erase background (background type 2)
-        I[I != 0] = 1  # everything else (paddles, ball) just set to 1
-    if flatten:
-        return I.astype(np.float).ravel()
-    else:
-        return I.astype(np.float)
+    if grayscale:
+        image = cv2.cvtColor(image, code=cv2.COLOR_RGB2GRAY)
+
+    if resize_to:
+        image = cv2.resize(image, (resize_to, resize_to))
+
+    return image.astype(np.float)
 
 
 def discount_rewards(rewards, discount_factor):
