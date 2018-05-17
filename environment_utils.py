@@ -61,3 +61,14 @@ def discount_rewards(rewards, discount_factor):
                 break
         discounted_rewards[t] = discounted_reward_sum
     return discounted_rewards
+
+
+def write_video(image_list, destination_path):
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    video_writer = cv2.VideoWriter(destination_path,
+                                   fourcc,
+                                   60.0,
+                                   (image_list[0].shape[1], image_list[0].shape[0]))
+    for image in image_list:
+        video_writer.write(image)
+    video_writer.release()

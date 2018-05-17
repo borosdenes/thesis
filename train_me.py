@@ -13,8 +13,7 @@ import shutil
 import gym
 import logging
 import os
-
-from environment_utils import prepro, discount_rewards, bin_prepro
+from environment_utils import prepro, discount_rewards, bin_prepro, write_video
 
 # -- ARGUMENT PARSING ---------------------------------------
 # -----------------------------------------------------------
@@ -35,6 +34,7 @@ parser.add_argument('--load', type=str, default=None,
                     help='Path to model folder to load. Must have same architecture as defined by args.')
 parser.add_argument('--checkpoint_every_n_episodes', type=int, default=10)
 parser.add_argument('--render', type=int, help='How often to render during training.')
+parser.add_argument('-record', '--record_every_nth_play', type=int)
 parser.add_argument('--summarize_every_n_episodes', type=int, default=1)
 parser.add_argument('--clean', action='store_true')
 args = parser.parse_args()
@@ -80,6 +80,7 @@ if args.environment == 'Pong-v0':
         2: 3
     }
 
+record_dir = 'records/{}/{}'.format(args.environment, args.identifier)
 if args.clean:
     try:
         os.remove('./logs/{env}/{id}.log'.format(env=args.environment,
@@ -92,6 +93,14 @@ if args.clean:
     shutil.rmtree('./summaries/{env}/{id}'.format(env=args.environment,
                                                   id=args.identifier),
                   ignore_errors=True)
+
+    if args.record_every_nth_play:
+        shutil.rmtree(record_dir,
+                      ignore_errors=True)
+
+if args.record_every_nth_play:
+    if not os.path.exists(record_dir):
+        os.makedirs(record_dir)
 
 # -- LOGGING INITIALIZER ------------------------------------
 # -----------------------------------------------------------
@@ -300,6 +309,15 @@ with sess:
             game_state, _, done, _ = env.step(env.action_space.sample())
             game_counter += 1
 
+            if args.record_every_nth_play:
+                if global_step.eval() % args.record_every_nth_play == 0:
+                    create_video = True
+                    game_states = []
+                else:
+                    create_video = False
+            else:
+                create_video = False
+
             while not done:
                 if 'bin' in preprocessors:
                     current_pix = bin_prepro(game_state)
@@ -319,6 +337,10 @@ with sess:
                 if args.render:
                     if (global_step.eval() != 0) & (global_step.eval() % args.render == 0) & (game_counter == 1):
                         env.render()
+
+                if create_video:
+                    game_states.append(game_state)
+
                 action = sess.run(sample_op, feed_dict={observations: [observation]})
                 game_state, reward, done, info = env.step(action_dictionary[int(action)])
 
@@ -326,6 +348,8 @@ with sess:
                 _actions.append(action)
                 _rewards.append(reward)
 
+            if create_video:
+                write_video(game_states, os.path.join(record_dir, '{:05}.avi'.format(global_step.eval())))
             logger.debug('Episode #{} has been finished with {} data-points.'.format(game_counter,
                                                                                      len(_observations)-before_counter))
 
