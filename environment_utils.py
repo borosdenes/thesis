@@ -36,6 +36,8 @@ def prepro(image, crop='Pong-v0', grayscale=True, resize_to=80):
 
     if crop == 'Pong-v0':
         image = image[35:195]  # crop
+    elif crop =='Enduro-v0':
+        image = image[3:156,8:]
     elif crop is not None:
         raise NotImplementedError
 
@@ -44,6 +46,7 @@ def prepro(image, crop='Pong-v0', grayscale=True, resize_to=80):
 
     if resize_to:
         image = cv2.resize(image, (resize_to, resize_to))
+        # image = np.array(Image.fromarray(image).convert(mode='L').resize((80, 80)))
 
     return image.astype(np.float)
 

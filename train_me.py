@@ -39,7 +39,7 @@ parser.add_argument('--summarize_every_n_episodes', type=int, default=1)
 parser.add_argument('--clean', action='store_true')
 args = parser.parse_args()
 
-if args.environment not in ['Pong-v0']:
+if args.environment not in ['Pong-v0', 'Enduro-v0']:
     raise NotImplementedError
 
 # -- VARIABLE INITIALIZER BASED ON GIVEN ID -----------------
@@ -79,6 +79,19 @@ if args.environment == 'Pong-v0':
         1: 2,
         2: 3
     }
+elif args.environment == 'Enduro-v0':
+    action_dictionary = {
+        0: 1,
+        1: 7,
+        2: 8
+        # 3: 4,
+        # 4: 5,
+        # 5: 6,
+        # 6: 7,
+        # 7: 8
+    }
+else:
+    raise NotImplementedError
 
 record_dir = 'records/{}/{}'.format(args.environment, args.identifier)
 if args.clean:
@@ -143,34 +156,19 @@ if network_type == 'mlp':
 elif network_type == 'cnn':
     if ('gray' in preprocessors) or ('bin' in preprocessors):
         observations = tf.placeholder(tf.float32,
-                                      [None, None, None, 1],
+                                      [None, 80, 80],
                                       name='observations')
-    else:
-        observations = tf.placeholder(tf.float32,
-                                      [None, None, None, 3],
-                                      name='observations')
+        reshaped_observations = tf.reshape(observations, [-1, 80, 80, 1])
 
-elif network_type == 'cnn_lstm':
-    if ('gray' in preprocessors) or ('bin' in preprocessors):
-        single_observation = tf.placeholder(tf.float32,
-                                            [None, None, 1],
-                                            name='single_observation')
-        observations = tf.placeholder(tf.float32,
-                                      [None, None, None, 1],
-                                      name='observations')
     else:
-        single_observation = tf.placeholder(tf.float32,
-                                            [None, None, 3],
-                                            name='single_observation')
         observations = tf.placeholder(tf.float32,
                                       [None, None, None, 3],
                                       name='observations')
 
 elif network_type == 'cnn_lstm':
     raise NotImplementedError
-
-    # observation_images = tf.reshape(observations, [-1, 80, 80, 1])
-
+else:
+    raise NotImplementedError
 
 actions = tf.placeholder(dtype=tf.int32, shape=[None], name='actions')
 tf.summary.histogram('actions', actions)
@@ -189,11 +187,18 @@ if network_type == 'mlp':
     for idx, layer in enumerate(dense_layers):
         input_len, output_len = map(int, unwrap(layer).split('.'))
         if idx == 0:
-            layers.append(
-                tf.layers.dense(inputs=observations,
-                                uints=output_len,
-                                activation=tf.nn.relu)
-            )
+            if ('gray' in preprocessors) or ('bin' in preprocessors):
+                layers.append(
+                    tf.layers.dense(inputs=reshaped_observations,
+                                    uints=output_len,
+                                    activation=tf.nn.relu)
+                )
+            else:
+                layers.append(
+                    tf.layers.dense(inputs=observations,
+                                    uints=output_len,
+                                    activation=tf.nn.relu)
+                )
         else:
             layers.append(
                 tf.layers.dense(inputs=layers[idx-1],
@@ -206,13 +211,22 @@ elif network_type == 'cnn':
     for idx, layer in enumerate(cnn_layers):
         input_channels, kernel_size, output_channels = map(int, unwrap(layer).split('.'))
         if idx == 0:
-            layers.append(
-                tf.layers.conv2d(inputs=observations,
-                                 filters=output_channels,
-                                 kernel_size=[kernel_size, kernel_size],
-                                 padding='same',
-                                 activation=tf.nn.relu)
-            )
+            if ('gray' in preprocessors) or ('bin' in preprocessors):
+                layers.append(
+                    tf.layers.conv2d(inputs=reshaped_observations,
+                                     filters=output_channels,
+                                     kernel_size=[kernel_size, kernel_size],
+                                     padding='same',
+                                     activation=tf.nn.relu)
+                )
+            else:
+                layers.append(
+                    tf.layers.conv2d(inputs=observations,
+                                     filters=output_channels,
+                                     kernel_size=[kernel_size, kernel_size],
+                                     padding='same',
+                                     activation=tf.nn.relu)
+                )
         else:
             layers.append(
                 tf.layers.conv2d(inputs=layers[idx-1],
@@ -222,7 +236,7 @@ elif network_type == 'cnn':
                                  activation=tf.nn.relu)
             )
 
-    if ('crop' in preprocessors) & (args.environment == 'Pong-v0'):
+    if ('crop' in preprocessors) & (args.environment in ['Pong-v0', 'Enduro-v0']):
         layers.append(
             tf.reshape(layers[-1], [-1, 80*80])
         )
@@ -240,15 +254,11 @@ elif network_type == 'cnn':
                             units=output_len,
                             activation=tf.nn.relu)
         )
-# elif network_type == 'cnn_lstm':
 
-
-# TODO: LSTM with logit output of size 3
-
-sample_op = tf.multinomial(logits=tf.reshape(layers[-1], shape=(1, 3)), num_samples=1)
+sample_op = tf.multinomial(logits=tf.reshape(layers[-1], shape=(1, len(action_dictionary))), num_samples=1)
 
 with tf.name_scope('cross_entropy'):
-    cross_entropy = tf.losses.softmax_cross_entropy(onehot_labels=tf.one_hot(actions, 3),
+    cross_entropy = tf.losses.softmax_cross_entropy(onehot_labels=tf.one_hot(actions, len(action_dictionary)),
                                                     logits=layers[-1],
                                                     weights=rewards)
     tf.summary.scalar('cross_entropy', cross_entropy)
@@ -279,7 +289,7 @@ with sess:
         saver.restore(sess, tf.train.latest_checkpoint('./checkpoints/{}/{}'.format(args.environment, args.load)))
 
     model_folder = './checkpoints/{env}/{id}'\
-                 .format(env=args.environment, id=args.identifier)
+                   .format(env=args.environment, id=args.identifier)
     if os.path.exists(model_folder):
         logger.info('Restoring model from {} ...'.format(model_folder))
         saver.restore(sess, tf.train.latest_checkpoint(model_folder))
@@ -296,6 +306,7 @@ with sess:
         _rewards = []
 
         while len(_observations) < batch_size:
+
             before_counter = len(_observations)
             logger.debug('Collected {} of {} observations ({:.1f} %).'.format(before_counter,
                                                                               batch_size,
@@ -319,6 +330,7 @@ with sess:
                 create_video = False
 
             while not done:
+
                 if 'bin' in preprocessors:
                     current_pix = bin_prepro(game_state)
                 else:
