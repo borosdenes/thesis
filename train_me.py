@@ -23,7 +23,7 @@ parser.add_argument('-id', '--identifier', type=str, required=True,
                     You can define loss type, optimizer and etc here.
                     Format: networktype__network_details__preprotype__hyperparams
                     
-                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)__prepro(crop_gray_diff)__b(6400)_l(0.001)_d(0.99)
+                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)_dropout__prepro(crop_gray_diff)__b(6400)_l(0.001)_d(0.99)_beta(0.0001)
                     cnn__c(3.3.10)_c(10.3.1)_f(6400.3)__prepro(crop)__b(6400)_l(0.001)_d(0.99)
                     mlp__f(6400.256)_f(256.3)__prepro(crop_bin_diff)__b(6400)_l(0.001)_d(0.99)
                     cnn_lstm__c(1.3.2)_c(2.3.1)_f(6400.256)_l(?)__prepro(crop)__b(?)_l(?)_d(0.99)''')
@@ -33,7 +33,6 @@ parser.add_argument('--environment', type=str, required=True,
 parser.add_argument('--load', type=str, default=None,
                     help='Path to model folder to load. Must have same architecture as defined by args.')
 parser.add_argument('--checkpoint_every_n_episodes', type=int, default=10)
-parser.add_argument('--render', type=int, help='How often to render during training.')
 parser.add_argument('-record', '--record_every_nth_play', type=int)
 parser.add_argument('--summarize_every_n_episodes', type=int, default=1)
 parser.add_argument('--clean', action='store_true')
@@ -51,6 +50,7 @@ network_details = network_details.split('_')
 cnn_layers = [element for element in network_details if 'c' in element]
 dense_layers = [element for element in network_details if 'f' in element]
 lstm_layers = [element for element in network_details if 'l' in element]
+dropout = 'dropout' in network_details
 
 if len(lstm_layers) != 0:
     raise NotImplementedError
@@ -67,10 +67,11 @@ else:
     do_crop = False
 do_grayscale = 'gray' in preprocessors
 
-batch_size, learning_rate, discount_rate = map(unwrap, hyperparameters.split('_'))
+batch_size, learning_rate, discount_rate, beta = map(unwrap, hyperparameters.split('_'))
 batch_size = int(batch_size)
 learning_rate = float(learning_rate)
 discount_rate = float(discount_rate)
+beta = float(beta)
 
 # -----------------------------------------------------------
 if args.environment == 'Pong-v0':
@@ -83,9 +84,9 @@ elif args.environment == 'Enduro-v0':
     action_dictionary = {
         0: 1,
         1: 7,
-        2: 8
-        # 3: 4,
-        # 4: 5,
+        2: 8,
+        3: 3,
+        4: 2
         # 5: 6,
         # 6: 7,
         # 7: 8
@@ -140,19 +141,21 @@ logger.debug('''Setting up training ...'
                 
                 )'''
              .format(args.environment, batch_size, network_type, args.load, args.identifier))
-# -----------------------------------------------------------
 
-# -- INITIALIZING STEPS -------------------------------------
-# -----------------------------------------------------------
 config = tf.ConfigProto()
 # config.gpu_options.allow_growth = True
 sess = tf.Session(config=config)
 logger.debug('Setting up training placeholders, variables and graph ...')
 
 if network_type == 'mlp':
-    observations = tf.placeholder(tf.float32,
-                                  [None, 80*80],
-                                  name='observations')
+    if ('gray' in preprocessors) or ('bin' in preprocessors):
+        observations = tf.placeholder(tf.float32,
+                                      [None, 80, 80],
+                                      name='observations')
+        reshaped_observations = tf.reshape(observations, [-1, 80, 80, 1])
+    else:
+        raise NotImplementedError
+
 elif network_type == 'cnn':
     if ('gray' in preprocessors) or ('bin' in preprocessors):
         if 'crop' not in preprocessors:
@@ -163,8 +166,10 @@ elif network_type == 'cnn':
         reshaped_observations = tf.reshape(observations, [-1, 80, 80, 1])
 
     else:
+        if 'crop' not in preprocessors:
+            raise NotImplementedError
         observations = tf.placeholder(tf.float32,
-                                      [None, None, None, 3],
+                                      [None, 80, 80, 3],
                                       name='observations')
 
 elif network_type == 'cnn_lstm':
@@ -172,7 +177,7 @@ elif network_type == 'cnn_lstm':
 else:
     raise NotImplementedError
 
-if ('gray' in preprocessors) or ('bin' in preprocessors):
+if ('gray' in preprocessors) or ('bin' in preprocessors) or (network_type == 'mlp'):
     tf.summary.image('observations', reshaped_observations, max_outputs=10)
 else:
     tf.summary.image('observations', observations, max_outputs=10)
@@ -188,31 +193,19 @@ mean_game_length = tf.placeholder(dtype=tf.float32, name='mean_game_length')
 tf.summary.scalar('mean_game_length', mean_game_length)
 
 global_step = tf.Variable(0, name='global_step', trainable=False)
+
 # -- TRAINING SETUP -----------------------------------------
 # -----------------------------------------------------------
 layers = []
 if network_type == 'mlp':
+    layers.append(tf.reshape(observations, [-1, 6400]))
     for idx, layer in enumerate(dense_layers):
         input_len, output_len = map(int, unwrap(layer).split('.'))
-        if idx == 0:
-            if ('gray' in preprocessors) or ('bin' in preprocessors):
-                layers.append(
-                    tf.layers.dense(inputs=reshaped_observations,
-                                    units=output_len,
-                                    activation=tf.nn.relu)
-                )
-            else:
-                layers.append(
-                    tf.layers.dense(inputs=observations,
-                                    units=output_len,
-                                    activation=tf.nn.relu)
-                )
-        else:
-            layers.append(
-                tf.layers.dense(inputs=layers[idx-1],
-                                units=output_len,
-                                activation=tf.nn.relu)
-            )
+        layers.append(
+            tf.layers.dense(inputs=layers[idx-1],
+                            units=output_len,
+                            activation=tf.nn.relu)
+        )
 
 elif network_type == 'cnn':
     # observations = tf.map_fn(tf.image.per_image_standardization, observations)
@@ -271,16 +264,20 @@ with tf.name_scope('cross_entropy'):
                                                     weights=rewards)
     tf.summary.scalar('cross_entropy', cross_entropy)
 
-network_vars = tf.trainable_variables()
-l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in network_vars if 'bias' not in v.name], name='l2_loss') * 0.001
-tf.summary.scalar('l2_loss', l2_loss)
-final_loss = tf.add(cross_entropy, l2_loss, name='final_loss')
-tf.summary.scalar('final_loss', final_loss)
+if beta:
+    network_vars = tf.trainable_variables()
+    l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in network_vars if 'bias' not in v.name], name='l2_loss') * beta
+    tf.summary.scalar('l2_loss', l2_loss)
+    final_loss = tf.add(cross_entropy, l2_loss, name='final_loss')
+    tf.summary.scalar('final_loss', final_loss)
 
 
 with tf.name_scope('training'):
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.minimize(final_loss, global_step=global_step)
+    if beta:
+        train_op = optimizer.minimize(final_loss, global_step=global_step)
+    else:
+        train_op = optimizer.minimize(cross_entropy, global_step=global_step)
 
 
 env = gym.make(args.environment)
@@ -355,15 +352,12 @@ with sess:
                     observation = current_pix - previous_pix
 
                 # Rescale input feature to [-1, 1]
-                observation = \
-                    (current_pix - np.min(current_pix, axis=(0, 1), keepdims=True))/(
-                            np.max(current_pix, axis=(0, 1), keepdims=True) - np.min(current_pix, axis=(0, 1), keepdims=True))
+                if observation.min() != observation.max():
+                    observation = \
+                        2 * ((observation - np.min(observation, axis=(0, 1), keepdims=True))/(
+                                np.max(observation, axis=(0, 1), keepdims=True) - np.min(observation, axis=(0, 1), keepdims=True))) - 1
 
                 previous_pix = current_pix
-
-                if args.render:
-                    if (global_step.eval() != 0) & (global_step.eval() % args.render == 0) & (game_counter == 1):
-                        env.render()
 
                 if create_video:
                     game_states.append(game_state)
@@ -377,6 +371,7 @@ with sess:
 
             if create_video:
                 write_video(game_states, os.path.join(record_dir, '{:05}.avi'.format(global_step.eval())))
+                del game_states
             logger.debug('Episode #{} has been finished with {} data-points.'.format(game_counter,
                                                                                      len(_observations)-before_counter))
 
