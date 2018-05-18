@@ -155,6 +155,8 @@ if network_type == 'mlp':
                                   name='observations')
 elif network_type == 'cnn':
     if ('gray' in preprocessors) or ('bin' in preprocessors):
+        if 'crop' not in preprocessors:
+            raise NotImplementedError
         observations = tf.placeholder(tf.float32,
                                       [None, 80, 80],
                                       name='observations')
@@ -170,10 +172,16 @@ elif network_type == 'cnn_lstm':
 else:
     raise NotImplementedError
 
+if ('gray' in preprocessors) or ('bin' in preprocessors):
+    tf.summary.image('observations', reshaped_observations, max_outputs=10)
+else:
+    tf.summary.image('observations', observations, max_outputs=10)
+
 actions = tf.placeholder(dtype=tf.int32, shape=[None], name='actions')
 tf.summary.histogram('actions', actions)
 
 rewards = tf.placeholder(dtype=tf.float32, shape=[None], name='rewards')
+tf.summary.histogram('rewards', rewards)
 mean_rewards = tf.placeholder(dtype=tf.float32, name='mean_rewards')
 tf.summary.scalar('mean_rewards', mean_rewards)
 mean_game_length = tf.placeholder(dtype=tf.float32, name='mean_game_length')
@@ -190,19 +198,19 @@ if network_type == 'mlp':
             if ('gray' in preprocessors) or ('bin' in preprocessors):
                 layers.append(
                     tf.layers.dense(inputs=reshaped_observations,
-                                    uints=output_len,
+                                    units=output_len,
                                     activation=tf.nn.relu)
                 )
             else:
                 layers.append(
                     tf.layers.dense(inputs=observations,
-                                    uints=output_len,
+                                    units=output_len,
                                     activation=tf.nn.relu)
                 )
         else:
             layers.append(
                 tf.layers.dense(inputs=layers[idx-1],
-                                uints=output_len,
+                                units=output_len,
                                 activation=tf.nn.relu)
             )
 
@@ -263,9 +271,16 @@ with tf.name_scope('cross_entropy'):
                                                     weights=rewards)
     tf.summary.scalar('cross_entropy', cross_entropy)
 
+network_vars = tf.trainable_variables()
+l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in network_vars if 'bias' not in v.name], name='l2_loss') * 0.001
+tf.summary.scalar('l2_loss', l2_loss)
+final_loss = tf.add(cross_entropy, l2_loss, name='final_loss')
+tf.summary.scalar('final_loss', final_loss)
+
+
 with tf.name_scope('training'):
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.minimize(cross_entropy, global_step=global_step)
+    train_op = optimizer.minimize(final_loss, global_step=global_step)
 
 
 env = gym.make(args.environment)
