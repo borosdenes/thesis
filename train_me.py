@@ -23,7 +23,7 @@ parser.add_argument('-id', '--identifier', type=str, required=True,
                     You can define loss type, optimizer and etc here.
                     Format: networktype__network_details__preprotype__hyperparams
                     
-                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)_dropout__prepro(crop_gray_diff)__b(6400)_l(0.001)_d(0.99)_beta(0.0001)
+                    cnn__c(1.3.2)_c(2.3.1)_f(6400.3)_dropout__prepro(crop_gray_diff)__b(6400)_l(0.001)_d(0.99)_beta(0.0001)_nrew(0)
                     cnn__c(3.3.10)_c(10.3.1)_f(6400.3)__prepro(crop)__b(6400)_l(0.001)_d(0.99)
                     mlp__f(6400.256)_f(256.3)__prepro(crop_bin_diff)__b(6400)_l(0.001)_d(0.99)
                     cnn_lstm__c(1.3.2)_c(2.3.1)_f(6400.256)_l(?)__prepro(crop)__b(?)_l(?)_d(0.99)''')
@@ -67,7 +67,7 @@ else:
     do_crop = False
 do_grayscale = 'gray' in preprocessors
 
-batch_size, learning_rate, discount_rate, beta = map(unwrap, hyperparameters.split('_'))
+batch_size, learning_rate, discount_rate, beta, norm_rewards = map(unwrap, hyperparameters.split('_'))
 batch_size = int(batch_size)
 learning_rate = float(learning_rate)
 discount_rate = float(discount_rate)
@@ -381,8 +381,9 @@ with sess:
 
         processed_rewards = discount_rewards(_rewards, discount_rate)
 
-        processed_rewards -= np.mean(processed_rewards)
-        processed_rewards /= np.std(processed_rewards)
+        if norm_rewards:
+            processed_rewards -= np.mean(processed_rewards)
+            processed_rewards /= np.std(processed_rewards)
 
         logger.debug('Training on current batch ...')
         feed_dict = {observations: _observations,
