@@ -72,6 +72,7 @@ batch_size = int(batch_size)
 learning_rate = float(learning_rate)
 discount_rate = float(discount_rate)
 beta = float(beta)
+norm_rewards = int(norm_rewards)
 
 # -----------------------------------------------------------
 if args.environment == 'Pong-v0':
@@ -83,10 +84,10 @@ if args.environment == 'Pong-v0':
 elif args.environment == 'Enduro-v0':
     action_dictionary = {
         0: 1,
-        1: 7,
-        2: 8,
-        3: 3,
-        4: 2
+        1: 7
+        # 2: 8,
+        # 3: 3,
+        # 4: 2
         # 5: 6,
         # 6: 7,
         # 7: 8
